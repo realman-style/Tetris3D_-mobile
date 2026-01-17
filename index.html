@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>3D 테트리스 (10x10x10) - Gemini</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Malgun Gothic', sans-serif; -webkit-user-select:none; user-select:none; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            background: rgba(0, 0, 0, 0.8); padding: 20px; border-radius: 12px;
+            border: 1px solid #444; pointer-events: auto;
+            line-height: 1.6; z-index: 40;
+        }
+        kbd {
+            background: #555; border-radius: 4px; padding: 2px 6px;
+            font-size: 0.9em; color: #00ffcc; border-bottom: 2px solid #222;
+        }
+        .score-board { font-size: 1.5em; color: #00ffcc; margin-bottom: 10px; font-weight: bold; }
+        .size-info { color: #ffeb3b; font-size: 0.9em; margin-bottom: 5px; }
+
+        /* 터치 컨트롤 스타일 */
+        #touch-controls {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            z-index: 50;
+            pointer-events: none; /* 내부 버튼이 pointer-events 받도록 부모는 none -> 자식은 auto */
+        }
+
+        .pad {
+            pointer-events: auto;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.45));
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 8px;
+            display: grid;
+            gap: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+            -webkit-touch-callout: none;
+        }
+
+        .movement-pad {
+            width: 180px;
+            grid-template-columns: repeat(3, 54px);
+            grid-template-rows: repeat(3, 54px);
+        }
+
+        .rotate-pad {
+            width: 220px;
+            grid-template-columns: repeat(3, 64px);
+            grid-template-rows: repeat(2, 54px);
+            align-items: center;
+            justify-items: center;
+        }
+
+        .btn {
+            width: 52px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.55);
+            color: #e6fff9;
+            border-radius: 10px;
+            font-size: 18px;
+            user-select: none;
+            -webkit-user-select:none;
+            touch-action: none;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .big-btn {
+            width: 68px;
+            height: 68px;
+            font-size: 20px;
+            border-radius: 12px;
+        }
+
+        .label {
+            font-size: 12px;
+            color: #ccc;
+            text-align: center;
+            margin-top: 6px;
+        }
+
+        @media (max-width: 600px) {
+            .movement-pad { width: 150px; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
+            .rotate-pad { width: 190px; grid-template-columns: repeat(3, 54px); grid-template-rows: repeat(2, 44px); }
+            .btn { width: 42px; height: 42px; font-size: 16px; }
+            .big-btn { width: 56px; height: 56px; font-size: 18px; }
+        }
+
+        /* 간단한 버튼 활성화 피드백 */
+        .btn:active, .btn.active {
+            transform: translateY(1px);
+            background: rgba(0,0,0,0.72);
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="score-board">SCORE: <span id="score">0</span></div>
+    <div class="size-info">공간 크기: 10 x 10 x 10</div>
+    <hr style="border:0; border-top:1px solid #444;">
+    <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> : 수평 이동 (X, Z축)</p>
+    <p><kbd>Space</kbd> : 빠른 하강</p>
+    <p><kbd>Q</kbd><kbd>E</kbd> : X축 회전 | <kbd>R</kbd><kbd>T</kbd> : Y축 회전 | <kbd>F</kbd><kbd>G</kbd> : Z축 회전</p>
+    <p style="font-size: 0.85em; color: #aaa;">* 마우스 드래그 / 터치 드래그: 시점 회전<br>* 휠: 확대/축소</p>
+</div>
+
+<!-- 터치 컨트롤 (하단 중앙) -->
+<div id="touch-controls" aria-hidden="false">
+    <div class="pad movement-pad" role="group" aria-label="이동패드">
+        <!-- row 1 -->
+        <div></div>
+        <button class="btn" data-move="forward" aria-label="앞으로">↑</button>
+        <div></div>
+
+        <!-- row 2 -->
+        <button class="btn" data-move="left" aria-label="왼쪽">◀</button>
+        <button class="btn big-btn" data-move="drop" aria-label="빠른 하강">↓</button>
+        <button class="btn" data-move="right" aria-label="오른쪽">▶</button>
+
+        <!-- row 3 -->
+        <div></div>
+        <button class="btn" data-move="back" aria-label="뒤로">↓</button>
+        <div></div>
+    </div>
+
+    <div class="pad rotate-pad" role="group" aria-label="회전패드" style="display:grid;">
+        <button class="btn" data-rotate="x+" aria-label="X축 회전 +">Q+</button>
+        <button class="btn" data-rotate="y+" aria-label="Y축 회전 +">R+</button>
+        <button class="btn" data-rotate="z+" aria-label="Z축 회전 +">F+</button>
+
+        <button class="btn" data-rotate="x-" aria-label="X축 회전 -">Q-</button>
+        <button class="btn" data-rotate="y-" aria-label="Y축 회전 -">R-</button>
+        <button class="btn" data-rotate="z-" aria-label="Z축 회전 -">F-</button>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- 게임 설정 (수정된 부분: 10x10x10) ---
+    const GRID_SIZE = 10;
+    const GRID_HEIGHT = 10;
+    let score = 0;
+    let board = [];
+    const tempV = new THREE.Vector3();
+
+    // 씬 및 카메라 설정
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0a);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // 카메라 위치 조정 (10x10 공간에 맞춰 더 멀리 배치)
+    const controls = new OrbitControls(camera, renderer.domElement);
+    camera.position.set(18, 18, 18);
+    controls.target.set(0, GRID_HEIGHT / 2, 0);
+    controls.update();
+
+    // 조명
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const pointLight = new THREE.PointLight(0xffffff, 1.2);
+    pointLight.position.set(15, 25, 15);
+    scene.add(pointLight);
+
+    // 가이드 격자 (바닥면 강조)
+    const gridHelper = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(GRID_SIZE, GRID_HEIGHT, GRID_SIZE)));
+    gridHelper.position.y = GRID_HEIGHT / 2;
+    gridHelper.material.color.set(0x00ffcc);
+    scene.add(gridHelper);
+
+    // 바닥면에 보조 그리드 추가
+    const floorGrid = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x00ffcc, 0x222222);
+    floorGrid.position.y = 0;
+    scene.add(floorGrid);
+
+    // 보드 데이터 초기화
+    for (let y = 0; y < GRID_HEIGHT; y++) {
+        board[y] = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+    }
+
+    // 블록 모양 정의 (3D 폴리큐브)
+    const shapes = [
+        [[0,0,0], [1,0,0], [0,1,0], [0,0,1]], // tripod
+        [[0,0,0], [1,0,0], [2,0,0], [1,1,0]], // T
+        [[0,0,0], [1,0,0], [0,1,0], [1,1,0]], // Cube
+        [[0,0,0], [0,1,0], [0,2,0], [0,3,0]], // I-Line
+        [[0,0,0], [1,0,0], [1,1,0], [2,1,0]], // Z
+    ];
+
+    let currentPiece = null;
+    let currentPos = { x: 0, y: 0, z: 0 };
+
+    function createPiece() {
+        const shape = shapes[Math.floor(Math.random() * shapes.length)];
+        const color = new THREE.Color().setHSL(Math.random(), 0.8, 0.6);
+        const group = new THREE.Group();
+
+        shape.forEach(p => {
+            const geometry = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+            const material = new THREE.MeshPhongMaterial({
+                color: color,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.9
+            });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(p[0], p[1], p[2]);
+            group.add(cube);
+        });
+
+        currentPiece = { mesh: group, shape: shape };
+        // 생성 위치를 중앙으로 조정
+        currentPos = { x: Math.floor(GRID_SIZE/2) - 1, y: GRID_HEIGHT - 3, z: Math.floor(GRID_SIZE/2) - 1 };
+        updatePiecePosition();
+        scene.add(group);
+
+        if (checkCollision()) {
+            alert("GAME OVER! 최종 점수: " + score);
+            location.reload();
+        }
+    }
+
+    function updatePiecePosition() {
+        if (!currentPiece) return;
+        currentPiece.mesh.position.set(
+            currentPos.x - GRID_SIZE/2 + 0.5,
+            currentPos.y + 0.5,
+            currentPos.z - GRID_SIZE/2 + 0.5
+        );
+    }
+
+    function checkCollision() {
+        if (!currentPiece) return false;
+        for (let child of currentPiece.mesh.children) {
+            child.getWorldPosition(tempV);
+
+            const absX = Math.round(tempV.x + GRID_SIZE / 2 - 0.5);
+            const absY = Math.round(tempV.y - 0.5);
+            const absZ = Math.round(tempV.z + GRID_SIZE / 2 - 0.5);
+
+            if (absX < 0 || absX >= GRID_SIZE || absZ < 0 || absZ >= GRID_SIZE || absY < 0) return true;
+            if (absY < GRID_HEIGHT && board[absY][absX][absZ] !== 0) return true;
+        }
+        return false;
+    }
+
+    function move(dx, dy, dz) {
+        if (!currentPiece) return false;
+        currentPos.x += dx;
+        currentPos.y += dy;
+        currentPos.z += dz;
+        updatePiecePosition();
+
+        if (checkCollision()) {
+            currentPos.x -= dx;
+            currentPos.y -= dy;
+            currentPos.z -= dz;
+            updatePiecePosition();
+            if (dy < 0) lockPiece();
+            return false;
+        }
+        return true;
+    }
+
+    function rotatePiece(axis, angle) {
+        if (!currentPiece) return;
+        currentPiece.mesh.rotation[axis] += angle;
+        currentPiece.mesh.updateMatrixWorld();
+        if (checkCollision()) {
+            currentPiece.mesh.rotation[axis] -= angle;
+        }
+    }
+
+    function lockPiece() {
+        if (!currentPiece) return;
+        const children = [...currentPiece.mesh.children];
+        children.forEach(child => {
+            child.getWorldPosition(tempV);
+            const absX = Math.round(tempV.x + GRID_SIZE / 2 - 0.5);
+            const absY = Math.round(tempV.y - 0.5);
+            const absZ = Math.round(tempV.z + GRID_SIZE / 2 - 0.5);
+
+            if (absY < GRID_HEIGHT && absY >= 0) {
+                const staticCube = child.clone();
+                // 위치를 정수 단위로 딱 떨어지게 고정
+                staticCube.position.x = Math.round(tempV.x * 2) / 2;
+                staticCube.position.y = Math.round(tempV.y * 2) / 2;
+                staticCube.position.z = Math.round(tempV.z * 2) / 2;
+
+                scene.add(staticCube);
+                board[absY][absX][absZ] = staticCube;
+            }
+        });
+
+        scene.remove(currentPiece.mesh);
+        currentPiece = null;
+        checkLines();
+        createPiece();
+    }
+
+    function checkLines() {
+        // 10x10 면적(100칸)이 꽉 찼는지 검사
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+            let isFull = true;
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let z = 0; z < GRID_SIZE; z++) {
+                    if (board[y][x][z] === 0) { isFull = false; break; }
+                }
+                if (!isFull) break;
+            }
+
+            if (isFull) {
+                score += 1000; // 10x10을 채우는 것은 어려우므로 더 높은 점수 부여
+                document.getElementById('score').innerText = score;
+
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let z = 0; z < GRID_SIZE; z++) {
+                        scene.remove(board[y][x][z]);
+                        board[y][x][z] = 0;
+                    }
+                }
+
+                for (let ty = y + 1; ty < GRID_HEIGHT; ty++) {
+                    for (let tx = 0; tx < GRID_SIZE; tx++) {
+                        for (let tz = 0; tz < GRID_SIZE; tz++) {
+                            if (board[ty][tx][tz] !== 0) {
+                                board[ty][tx][tz].position.y -= 1;
+                                board[ty-1][tx][tz] = board[ty][tx][tz];
+                                board[ty][tx][tz] = 0;
+                            }
+                        }
+                    }
+                }
+                y--;
+            }
+        }
+    }
+
+    // 키보드 이벤트 (기존 유지)
+    window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        if (key === 'a') move(-1, 0, 0);
+        if (key === 'd') move(1, 0, 0);
+        if (key === 'w') move(0, 0, -1);
+        if (key === 's') move(0, 0, 1);
+        if (key === ' ') move(0, -1, 0);
+
+        if (key === 'q') rotatePiece('x', Math.PI/2);
+        if (key === 'e') rotatePiece('x', -Math.PI/2);
+        if (key === 'r') rotatePiece('y', Math.PI/2);
+        if (key === 't') rotatePiece('y', -Math.PI/2);
+        if (key === 'f') rotatePiece('z', Math.PI/2);
+        if (key === 'g') rotatePiece('z', -Math.PI/2);
+    });
+
+    // --- 모바일/터치용 컨트롤 바인딩 ---
+    // 연속 입력(누르고 있는 동안 반복) 바인딩 헬퍼
+    function bindRepeat(el, actionFn, firstDelay = 0) {
+        let id = null;
+        const immediate = (e) => {
+            e.preventDefault();
+            el.classList.add('active');
+            actionFn();
+            // 첫 반복은 짧은 지연없이 바로 시작
+            id = setInterval(actionFn, 140);
+        };
+        const stop = () => {
+            el.classList.remove('active');
+            if (id) { clearInterval(id); id = null; }
+        };
+        el.addEventListener('pointerdown', immediate);
+        window.addEventListener('pointerup', stop);
+        el.addEventListener('pointercancel', stop);
+        el.addEventListener('pointerleave', stop);
+        // 터치 환경에서 클릭/탭도 동작하게 하기 위해 click은 별도 처리 (짧게 누를 때)
+        el.addEventListener('click', (e) => { e.preventDefault(); /* 이미 handled in pointerdown */ });
+    }
+
+    // 매핑: data-move
+    const moveButtons = {
+        'left': () => move(-1,0,0),
+        'right': () => move(1,0,0),
+        'forward': () => move(0,0,-1),
+        'back': () => move(0,0,1),
+        'drop': () => move(0,-1,0)
+    };
+
+    // data-rotate mapping
+    const rotateButtons = {
+        'x+': () => rotatePiece('x', Math.PI/2),
+        'x-': () => rotatePiece('x', -Math.PI/2),
+        'y+': () => rotatePiece('y', Math.PI/2),
+        'y-': () => rotatePiece('y', -Math.PI/2),
+        'z+': () => rotatePiece('z', Math.PI/2),
+        'z-': () => rotatePiece('z', -Math.PI/2)
+    };
+
+    // 바인딩 함수 실행 (DOMContentLoaded 보장)
+    function setupTouchControls() {
+        document.querySelectorAll('[data-move]').forEach(btn => {
+            const key = btn.getAttribute('data-move');
+            const fn = moveButtons[key];
+            if (!fn) return;
+            bindRepeat(btn, fn);
+            // 단순 탭(짧게 누름)에서도 동작하도록 포인터down 후 포인터up 간격을 고려하지만 pointerdown에서 즉시 실행하므로 충분
+        });
+
+        document.querySelectorAll('[data-rotate]').forEach(btn => {
+            const key = btn.getAttribute('data-rotate');
+            const fn = rotateButtons[key];
+            if (!fn) return;
+            // 회전은 일반적으로 반복이 필요없으므로 한 번만 실행하고, 누르고 있어도 200ms 딜레이 후 반복 실행 되지 않도록 별도 처리
+            let holdId = null;
+            const start = (e) => {
+                e.preventDefault();
+                btn.classList.add('active');
+                fn();
+                // 짧게 누를 때 여러 회전이 생기지 않도록 반복은 하지 않음
+            };
+            const stop = () => { btn.classList.remove('active'); if (holdId) { clearInterval(holdId); holdId = null; } };
+            btn.addEventListener('pointerdown', start);
+            window.addEventListener('pointerup', stop);
+            btn.addEventListener('pointercancel', stop);
+            btn.addEventListener('pointerleave', stop);
+        });
+    }
+
+    // 컨트롤 초기화 (약간 지연 후 DOM에 추가된 버튼에 바인딩)
+    setTimeout(setupTouchControls, 50);
+
+    // animate 루프
+    let lastTime = 0;
+    let dropTimer = 0;
+    function animate(time = 0) {
+        const deltaTime = time - lastTime;
+        lastTime = time;
+
+        dropTimer += deltaTime;
+        if (dropTimer > 800) { // 공간이 넓으므로 속도를 약간 빠르게 조정 (1000ms -> 800ms)
+            move(0, -1, 0);
+            dropTimer = 0;
+        }
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+    }
+
+    createPiece();
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // (추가 고려) 컨트롤/카메라 제스처 충돌을 줄이려면,
+    // OrbitControls의 터치 동작을 필요에 따라 임시로 비활성화하는 로직을 넣을 수 있습니다.
+    // 예: 터치패드 영역(pointerdown)에서 controls.enabled = false; pointerup에서 true로 복원.
+</script>
+</body>
+</html>
